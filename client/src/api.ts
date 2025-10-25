@@ -129,7 +129,7 @@ export async function postImage(imageUri: string): Promise<DetectResponse> {
 }
 
 /**
- * Get text for client-side speech synthesis (iOS TTS).
+ * Get text for iOS TTS (passthrough).
  */
 export async function postTTS(text: string): Promise<string> {
   try {

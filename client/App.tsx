@@ -89,7 +89,37 @@ export default function App() {
     };
   }, []);
 
-  // No automatic loop! User presses button to analyze scene.
+  /**
+   * Continuous guidance: Auto-capture every 5 seconds while navigating
+   */
+  useEffect(() => {
+    if (state === 'NAVIGATING' && checkpoint) {
+      console.log('🔄 Starting continuous guidance (5s intervals)...');
+
+      const interval = setInterval(async () => {
+        if (cameraRef.current && !isProcessing) {
+          try {
+            const photo = await cameraRef.current.takePictureAsync({
+              quality: 0.5,
+              skipProcessing: true,
+            });
+
+            if (photo?.uri) {
+              console.log('📸 Auto-captured frame:', photo.uri);
+              await handleFrameCapture(photo.uri);
+            }
+          } catch (error) {
+            console.error('Auto-capture error:', error);
+          }
+        }
+      }, 5000); // Every 5 seconds
+
+      return () => {
+        console.log('⏹️ Stopping continuous guidance');
+        clearInterval(interval);
+      };
+    }
+  }, [state, checkpoint, isProcessing, handleFrameCapture]);
 
   /**
    * Show permission alerts if needed.

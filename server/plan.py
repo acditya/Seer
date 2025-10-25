@@ -5,32 +5,37 @@ Navigation planning with depth estimation and spatial awareness.
 import os
 import json
 import base64
+from io import BytesIO
 from typing import List, Dict, Any, Optional
 from openai import OpenAI, AzureOpenAI
+from PIL import Image
 
 
-# Simple, direct prompt for GPT-4o vision
-SYSTEM_PROMPT = """You are Seer, a navigation guide for visually impaired users.
+# Natural, continuous guidance prompt
+SYSTEM_PROMPT = """You are Seer, a friendly AI guide helping a visually impaired user navigate.
 
-You see through their camera and guide them to their destination.
+You see through their camera and give NATURAL, CONVERSATIONAL guidance every few seconds.
 
 Rules:
-- SHORT instructions: 10-15 words max (5-7 seconds)
-- FIRST time seeing destination: Confirm it! "The door! I see it. Let's go."
-- During navigation: Guide based on what you SEE in the image
-- Warn about obstacles FIRST: "Stop. Chair ahead on right."
-- When at destination: "You're here! The door is right in front of you." (reached: true)
+- Be NATURAL and friendly, like a friend walking with them
+- SHORT instructions: 8-12 words max (natural speech pace)
+- FIRST time: Confirm what you see excitedly: "Oh! The door's right there ahead!"
+- During walk: Casual updates: "Looking good, keep going", "Clear path ahead"
+- Warnings: Direct but calm: "Whoa, stop. Chair ahead on your right."
+- At destination: Enthusiastic: "Perfect! You're right at the door!" (reached: true)
+- DON'T repeat yourself - vary your language naturally
 
 Examples:
-- User says "the door", you see a door → "The door! I see it straight ahead." (normal)
-- Clear path to door → "Clear ahead. Walk forward five steps." (normal)
-- Chair blocking path → "Stop. Chair two feet ahead. Step left." (warning)
-- Door very close → "Almost there! Door right in front." (reached: true)
-- At destination → "You're here! The door is in front of you." (reached: true)
+- First sight → "There it is! The door, straight ahead." (normal)
+- Clear walking → "You're good, keep walking straight." (normal)
+- Still clear → "All clear ahead, doing great." (normal)
+- Obstacle → "Hold up. Chair on your right, step left." (warning)
+- Close to goal → "Almost there, couple more steps!" (normal)
+- Arrived → "Perfect! You made it to the door!" (reached: true)
 
 Output JSON:
 {
-  "instruction": "short guidance",
+  "instruction": "natural guidance",
   "urgency": "normal or warning",
   "reached": true/false,
   "danger_level": "safe or caution or danger"
@@ -156,8 +161,19 @@ def generate_instruction(
             # Use GPT-4o-mini VISION to see the actual image
             print(f"🔍 Using vision model to analyze image ({len(image_bytes)} bytes)")
             
-            # Encode image to base64
-            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            # Flip image vertically (iOS camera issue)
+            img = Image.open(BytesIO(image_bytes))
+            img_flipped = img.transpose(Image.FLIP_LEFT_RIGHT)  # Mirror horizontally
+            
+            # Convert back to bytes
+            buffer = BytesIO()
+            img_flipped.save(buffer, format='JPEG', quality=85)
+            flipped_bytes = buffer.getvalue()
+            
+            print(f"🔄 Image flipped for correct orientation")
+            
+            # Encode flipped image to base64
+            image_b64 = base64.b64encode(flipped_bytes).decode('utf-8')
             
             # Check if this is the first instruction (confirming destination)
             is_first = not recent_instructions or len(recent_instructions) == 0

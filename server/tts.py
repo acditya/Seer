@@ -1,27 +1,24 @@
 """
-Text-to-speech passthrough - just returns text for client-side iOS TTS.
-No audio files needed!
+Text-to-speech passthrough - returns text for iOS TTS.
+Simpler and more reliable after microphone recording!
 """
 
 from pathlib import Path
 
-# Keep this for compatibility
+# Keep for compatibility
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
 
 def synthesize_speech(text: str) -> str:
     """
-    Return text as-is for client to speak using iOS TTS.
-    No server-side audio generation needed!
+    Return text for iOS to speak.
     
     Args:
         text: Text to speak
         
     Returns:
-        The same text (client will use Expo Speech)
+        Same text (iOS handles TTS)
     """
-    print(f"🎤 TTS passthrough: '{text[:60]}...'")
-    
-    # Just return the text - client handles TTS
+    print(f"🎤 iOS TTS: '{text[:60]}...'")
     return text

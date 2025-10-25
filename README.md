@@ -6,8 +6,8 @@
 
 - 🎤 **Voice-first interface** - Press-to-talk interaction
 - 👁️ **GPT-4o-mini vision** - AI sees through your camera in real-time
-- 🧠 **Intelligent guidance** - Natural language directions to any destination
-- 🔊 **Natural speech** - iOS built-in text-to-speech
+- 🤖 **Continuous guidance** - AI speaks every 5 seconds automatically, like a friend
+- 🗣️ **Natural speech** - iOS built-in TTS (reliable after recording)
 - 📍 **Checkpoint navigation** - "Take me to the door", "Find the elevator"
 - 📳 **Haptic feedback** - Feel when recording/navigating
 - ♿ **Accessibility-focused** - Large touch targets, voice feedback
@@ -64,15 +64,16 @@ npm start
 
 ## Usage
 
-**Simple & Interrupt-based:**
+**Natural & Continuous:**
 
 1. **Press and hold** the green button
-2. **Say your destination**: "elevator", "exit", "bathroom"
-3. **Release** → App captures scene, analyzes, speaks ONCE
-4. **Press again** to check scene or give commands
-5. **Feel haptic feedback** for key events
+2. **Say your destination**: "the door", "elevator", "bathroom"
+3. **Release** → AI confirms: "There it is! The door, straight ahead."
+4. **Walk naturally** → AI guides you every 5 seconds automatically
+5. **AI speaks**: "You're good, keep going", "Stop. Chair on your right."
+6. **Arrival**: "Perfect! You're right at the door!"
 
-**New flow:** No continuous loop! Press button → Analyze → Speak → Wait for next press.
+**Continuous guidance:** AI sees through your camera every 5 seconds and speaks naturally like a friend walking with you.
 
 ### Voice Commands
 

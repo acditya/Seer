@@ -83,13 +83,13 @@ def speech_to_text():
 @app.route('/tts', methods=['POST'])
 def text_to_speech():
     """
-    Return text for client-side iOS TTS.
+    Return text for iOS TTS (passthrough).
     
     Expects:
         JSON: {"text": "text to speak"}
         
     Returns:
-        JSON: {"text": "same text for iOS to speak"}
+        JSON: {"text": "same text"}
     """
     try:
         data = request.get_json()
@@ -98,10 +98,10 @@ def text_to_speech():
         
         text = data['text']
         
-        # Just pass through - client handles TTS
-        result_text = synthesize_speech(text)
+        # Pass through for iOS TTS
+        result = synthesize_speech(text)
         
-        return jsonify({"text": result_text})
+        return jsonify({"text": result})
     
     except Exception as e:
         print(f"TTS error: {e}")

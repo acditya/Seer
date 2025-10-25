@@ -41,16 +41,14 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
   const historySnippets = useRef<string[]>([]);
 
   /**
-   * Speak text using iOS built-in TTS.
+   * Speak using iOS TTS (more reliable after recording).
    */
   const playTTS = useCallback(async (text: string, urgency: 'normal' | 'warning' = 'normal') => {
     try {
       // Stop any currently speaking
       Speech.stop();
 
-      // Get text from server (passthrough)
-      const speechText = await postTTS(text);
-      console.log('Speaking:', speechText);
+      console.log('Speaking:', text);
 
       // Configure audio to use MAIN SPEAKER (not earpiece!)
       await Audio.setAudioModeAsync({
@@ -62,10 +60,10 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
       });
 
       // Speak using iOS TTS
-      Speech.speak(speechText, {
+      Speech.speak(text, {
         language: 'en-US',
         pitch: 1.0,
-        rate: urgency === 'warning' ? 0.85 : 0.9, // Slightly slower for warnings
+        rate: urgency === 'warning' ? 0.85 : 0.95,
       });
 
       // Update UI
