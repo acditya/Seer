@@ -11,8 +11,9 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { postAudio, postImage, postTTS, postPlan, Detection } from '../api';
 import type { StatusType } from '../components/StatusChip';
+import { Language, DEFAULT_LANGUAGE } from '../types/languages';
 
-type NavigationState = 'ASK_GOAL' | 'NAVIGATING' | 'REACHED' | 'ASK_NEXT' | 'END';
+type NavigationState = 'SELECT_LANGUAGE' | 'ASK_GOAL' | 'NAVIGATING' | 'REACHED' | 'ASK_NEXT' | 'END';
 
 interface UseNavigationLoopReturn {
   state: NavigationState;
@@ -20,6 +21,8 @@ interface UseNavigationLoopReturn {
   checkpoint: string | null;
   lastInstruction: string | null;
   lastUrgency: 'normal' | 'warning';
+  language: Language;
+  setLanguage: (language: Language) => void;
   handleVoiceInput: (audioUri: string) => Promise<void>;
   handleFrameCapture: (imageUri: string) => Promise<void>;
   setCheckpoint: (checkpoint: string) => void;
@@ -29,12 +32,13 @@ interface UseNavigationLoopReturn {
 
 export function useNavigationLoop(): UseNavigationLoopReturn {
   // State
-  const [state, setState] = useState<NavigationState>('ASK_GOAL');
+  const [state, setState] = useState<NavigationState>('SELECT_LANGUAGE');
   const [status, setStatus] = useState<StatusType>('idle');
   const [checkpoint, setCheckpointState] = useState<string | null>(null);
   const [lastInstruction, setLastInstruction] = useState<string | null>(null);
   const [lastUrgency, setLastUrgency] = useState<'normal' | 'warning'>('normal');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [language, setLanguageState] = useState<Language>(DEFAULT_LANGUAGE);
 
   // History tracking
   const recentInstructions = useRef<string[]>([]);
@@ -59,9 +63,9 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
         playThroughEarpieceAndroid: false,
       });
 
-      // Speak using iOS TTS
+      // Speak using iOS TTS in selected language
       Speech.speak(text, {
-        language: 'en-US',
+        language: language.ttsVoice,
         pitch: 1.0,
         rate: urgency === 'warning' ? 0.85 : 0.95,
       });
@@ -101,8 +105,8 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     setStatus('listening');
 
     try {
-      // Transcribe audio
-      const transcript = await postAudio(audioUri);
+      // Transcribe audio in selected language
+      const transcript = await postAudio(audioUri, language.whisperCode);
       console.log('Transcript:', transcript);
 
       historySnippets.current.push(`user: ${transcript}`);
@@ -174,26 +178,40 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
       // Skip YOLO - just send image directly to GPT-4o vision!
       console.log('Analyzing scene with GPT-4o vision...');
 
-      // Plan next instruction (GPT-4o sees the image directly)
+      // Plan next instruction (GPT-4o sees the image directly, responds in selected language)
       const planResult = await postPlan(
         checkpoint,
         [],  // No YOLO detections needed!
         recentInstructions.current,
         historySnippets.current,
-        imageUri  // Send camera image to GPT-4o!
+        imageUri,  // Send camera image to GPT-4o!
+        language.whisperCode  // Language for LLM response
       );
 
       console.log('Plan:', planResult);
 
+      // Haptic feedback based on danger level
+      if (planResult.danger_level === 'danger') {
+        // Immediate danger - strong warning haptic
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } else if (planResult.danger_level === 'caution') {
+        // Caution - medium warning haptic
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } else if (planResult.danger_level === 'safe') {
+        // Safe - light feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+
       // Play instruction
       await playTTS(planResult.instruction, planResult.urgency as 'normal' | 'warning');
 
-      // Check if reached
+      // Check if reached (LLM says they're RIGHT AT IT)
       if (planResult.reached) {
+        console.log('🎯 Destination reached! Stopping continuous guidance.');
         setState('REACHED');
         setStatus('reached');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        await playTTS(`You've reached ${checkpoint}.`);
+        // Don't speak again - LLM already said they reached it
       }
     } catch (error) {
       console.error('Frame processing error:', error);
@@ -202,6 +220,15 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
       setIsProcessing(false);
     }
   }, [state, checkpoint, isProcessing, playTTS]);
+
+  /**
+   * Set language and move to ASK_GOAL state.
+   */
+  const setLanguage = useCallback((selectedLanguage: Language) => {
+    setLanguageState(selectedLanguage);
+    setState('ASK_GOAL');
+    console.log(`Language set to: ${selectedLanguage.name}`);
+  }, []);
 
   /**
    * Set checkpoint and start navigating.
@@ -225,7 +252,7 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     historySnippets.current = [];
   }, []);
 
-  // Configure audio and speak welcome message on mount
+  // Configure audio on mount
   useEffect(() => {
     const setupAudio = async () => {
       // Force main speaker (not earpiece)
@@ -236,12 +263,10 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
-      
-      playTTS("Hi, I'm Seer. Say a checkpoint.");
     };
     
     setupAudio();
-  }, [playTTS]);
+  }, []);
 
   return {
     state,
@@ -249,6 +274,8 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     checkpoint,
     lastInstruction,
     lastUrgency,
+    language,
+    setLanguage,
     handleVoiceInput,
     handleFrameCapture,
     setCheckpoint,

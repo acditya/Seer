@@ -69,19 +69,20 @@ export type PlanResponse = z.infer<typeof PlanResponseSchema>;
 /**
  * Upload audio file for speech-to-text transcription.
  */
-export async function postAudio(audioUri: string): Promise<string> {
+export async function postAudio(audioUri: string, language: string = 'en'): Promise<string> {
   try {
     const formData = new FormData();
     
     // Extract filename from URI
     const filename = audioUri.split('/').pop() || 'audio.m4a';
     
-    // Append audio file
+    // Append audio file and language
     formData.append('audio', {
       uri: audioUri,
       type: 'audio/m4a',
       name: filename,
     } as any);
+    formData.append('language', language);
     
     const response = await api.post('/stt', formData, {
       headers: {
@@ -153,7 +154,8 @@ export async function postPlan(
   detections: Detection[],
   recentInstructions: string[] = [],
   historySnippets: string[] = [],
-  imageUri?: string
+  imageUri?: string,
+  language: string = 'en'
 ): Promise<PlanResponse> {
   try {
     if (imageUri) {
@@ -163,6 +165,7 @@ export async function postPlan(
       formData.append('detections', JSON.stringify(detections));
       formData.append('recent_instructions', JSON.stringify(recentInstructions));
       formData.append('history_snippets', JSON.stringify(historySnippets));
+      formData.append('language', language);
       
       // Append image
       const filename = imageUri.split('/').pop() || 'frame.jpg';
@@ -187,6 +190,7 @@ export async function postPlan(
         detections,
         recent_instructions: recentInstructions,
         history_snippets: historySnippets,
+        language,
       });
       
       const validated = PlanResponseSchema.parse(response.data);

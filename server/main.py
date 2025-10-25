@@ -55,6 +55,7 @@ def speech_to_text():
     
     Expects:
         audio: Audio file (m4a, wav, etc.)
+        language: ISO language code (optional, defaults to 'en')
         
     Returns:
         JSON: {"text": "transcribed text"}
@@ -67,11 +68,14 @@ def speech_to_text():
         if audio_file.filename == '':
             return jsonify({"error": "No selected file"}), 400
         
+        # Get language (defaults to English)
+        language = request.form.get('language', 'en')
+        
         # Read audio bytes
         audio_bytes = audio_file.read()
         
-        # Transcribe
-        text = transcribe_audio(audio_bytes, audio_file.filename or "audio.m4a")
+        # Transcribe in selected language
+        text = transcribe_audio(audio_bytes, audio_file.filename or "audio.m4a", language)
         
         return jsonify({"text": text})
     
@@ -137,6 +141,7 @@ def plan_navigation():
             detections = json.loads(request.form.get('detections', '[]'))
             recent_instructions = json.loads(request.form.get('recent_instructions', '[]'))
             history_snippets = json.loads(request.form.get('history_snippets', '[]'))
+            language = request.form.get('language', 'en')
             
             # Get image if provided
             image_bytes = None
@@ -154,18 +159,20 @@ def plan_navigation():
             detections = data.get('detections', [])
             recent_instructions = data.get('recent_instructions', [])
             history_snippets = data.get('history_snippets', [])
+            language = data.get('language', 'en')
             image_bytes = None
         
         if not checkpoint:
             return jsonify({"error": "No checkpoint provided"}), 400
         
-        # Generate instruction (with vision if image provided)
+        # Generate instruction (with vision if image provided, in selected language)
         result = generate_instruction(
             checkpoint=checkpoint,
             detections=detections,
             recent_instructions=recent_instructions,
             history_snippets=history_snippets,
-            image_bytes=image_bytes
+            image_bytes=image_bytes,
+            language=language
         )
         
         # Update server state

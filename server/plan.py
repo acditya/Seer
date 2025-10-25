@@ -11,7 +11,7 @@ from openai import OpenAI, AzureOpenAI
 from PIL import Image
 
 
-# Natural, continuous guidance prompt
+# Natural, continuous guidance prompt with STRICT reaching criteria
 SYSTEM_PROMPT = """You are Seer, a friendly AI guide helping a visually impaired user navigate.
 
 You see through their camera and give NATURAL, CONVERSATIONAL guidance every few seconds.
@@ -22,16 +22,21 @@ Rules:
 - FIRST time: Confirm what you see excitedly: "Oh! The door's right there ahead!"
 - During walk: Casual updates: "Looking good, keep going", "Clear path ahead"
 - Warnings: Direct but calm: "Whoa, stop. Chair ahead on your right."
-- At destination: Enthusiastic: "Perfect! You're right at the door!" (reached: true)
 - DON'T repeat yourself - vary your language naturally
 
+**CRITICAL - REACHED = TRUE ONLY WHEN:**
+- The destination is EXTREMELY close (within 1-2 feet)
+- Takes up MOST of the frame (they're basically touching it)
+- They can REACH OUT AND TOUCH IT
+- NOT just visible! NOT just "close"! ONLY when RIGHT AT IT!
+
 Examples:
-- First sight → "There it is! The door, straight ahead." (normal)
-- Clear walking → "You're good, keep walking straight." (normal)
-- Still clear → "All clear ahead, doing great." (normal)
-- Obstacle → "Hold up. Chair on your right, step left." (warning)
-- Close to goal → "Almost there, couple more steps!" (normal)
-- Arrived → "Perfect! You made it to the door!" (reached: true)
+- First sight (far away) → "There it is! The door, straight ahead." (reached: FALSE)
+- Getting closer → "You're good, keep walking straight." (reached: FALSE)
+- Getting close → "Almost there, couple more steps!" (reached: FALSE)
+- Very close but not at it → "One more step forward!" (reached: FALSE)
+- RIGHT AT IT (fills frame, <1 foot) → "Perfect! You're right at the door!" (reached: TRUE)
+- Obstacle → "Hold up. Chair on your right, step left." (warning, reached: FALSE)
 
 Output JSON:
 {
@@ -133,7 +138,8 @@ def generate_instruction(
     detections: List[Dict[str, Any]],
     recent_instructions: List[str],
     history_snippets: List[str],
-    image_bytes: Optional[bytes] = None
+    image_bytes: Optional[bytes] = None,
+    language: str = "en"
 ) -> Dict[str, Any]:
     """
     Generate navigation instruction with spatial awareness.
@@ -178,6 +184,14 @@ def generate_instruction(
             # Check if this is the first instruction (confirming destination)
             is_first = not recent_instructions or len(recent_instructions) == 0
             
+            # Language names mapping
+            lang_names = {
+                'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+                'it': 'Italian', 'pt': 'Portuguese', 'hi': 'Hindi', 'ar': 'Arabic',
+                'ru': 'Russian', 'zh': 'Chinese', 'ja': 'Japanese', 'ko': 'Korean'
+            }
+            lang_name = lang_names.get(language, 'English')
+            
             if is_first:
                 user_message = f"""I want to go to: {checkpoint}
 
@@ -186,7 +200,7 @@ Look at the image. Do you see {checkpoint}?
 If you see it: Confirm enthusiastically! "The {checkpoint}! I see it."
 If you don't: "I don't see {checkpoint} yet. Describe what's ahead."
 
-SHORT response (10-15 words). JSON format."""
+**RESPOND IN {lang_name.upper()}**. SHORT response (10-15 words). JSON format."""
             else:
                 user_message = f"""I'm navigating to: {checkpoint}
 
@@ -197,7 +211,7 @@ Look at the camera. What do you see?
 
 Recent: {recent_instructions[-2:]}
 
-Guide me. SHORT (10-15 words). JSON format."""
+**RESPOND IN {lang_name.upper()}**. Guide me. SHORT (10-15 words). JSON format."""
 
             response = client.chat.completions.create(
                 model=model,

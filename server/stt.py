@@ -8,13 +8,14 @@ from io import BytesIO
 from openai import OpenAI
 
 
-def transcribe_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> str:
+def transcribe_audio(audio_bytes: bytes, filename: str = "audio.m4a", language: str = "en") -> str:
     """
     Transcribe audio using OpenAI Whisper API.
     
     Args:
         audio_bytes: Audio file bytes (M4A from iPhone)
         filename: Original filename
+        language: ISO language code (e.g., 'en', 'es', 'fr')
         
     Returns:
         Transcribed text
@@ -25,7 +26,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> str:
     
     client = OpenAI(api_key=api_key)
     
-    print(f"🎙️ Transcribing {len(audio_bytes)} bytes with Whisper...")
+    print(f"🎙️ Transcribing {len(audio_bytes)} bytes with Whisper ({language})...")
     
     # Create file-like object from bytes
     audio_file = BytesIO(audio_bytes)
@@ -36,7 +37,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> str:
         response = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language="en"
+            language=language  # Use selected language
         )
         
         transcript = response.text.strip()

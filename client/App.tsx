@@ -19,6 +19,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import PressToTalk from './src/components/PressToTalk';
 import StatusChip from './src/components/StatusChip';
 import InstructionBanner from './src/components/InstructionBanner';
+import LanguageSelector from './src/components/LanguageSelector';
 import { useNavigationLoop } from './src/hooks/useNavigationLoop';
 import { colors, spacing } from './src/styles/tokens';
 
@@ -37,6 +38,8 @@ export default function App() {
     checkpoint,
     lastInstruction,
     lastUrgency,
+    language,
+    setLanguage,
     handleVoiceInput,
     handleFrameCapture,
     isProcessing,
@@ -172,6 +175,12 @@ export default function App() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
+
+      {/* Language Selector Modal */}
+      <LanguageSelector
+        visible={state === 'SELECT_LANGUAGE'}
+        onSelectLanguage={setLanguage}
+      />
 
       {/* Camera preview (fullscreen background) */}
       <CameraView
