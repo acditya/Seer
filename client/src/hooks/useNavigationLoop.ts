@@ -54,20 +54,27 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
 
       console.log('Speaking:', text);
 
-      // Configure audio to use MAIN SPEAKER (not earpiece!)
+      // FORCE SPEAKER OUTPUT (override iOS earpiece routing)
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
+        // FORCE SPEAKER!
+        interruptionModeIOS: 2, // DoNotMix
       });
+
+      // Small delay to let audio route switch
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Speak using iOS TTS in selected language
       Speech.speak(text, {
         language: language.ttsVoice,
         pitch: 1.0,
         rate: urgency === 'warning' ? 0.85 : 0.95,
+        // iOS-specific: force speaker
+        _voiceIndex: undefined,
       });
 
       // Update UI
@@ -252,17 +259,20 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     historySnippets.current = [];
   }, []);
 
-  // Configure audio on mount
+  // Configure audio on mount - FORCE SPEAKER ALWAYS!
   useEffect(() => {
     const setupAudio = async () => {
-      // Force main speaker (not earpiece)
+      // ALWAYS use main speaker (never earpiece)
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
+        interruptionModeIOS: 2, // DoNotMix - forces speaker output
       });
+      
+      console.log('🔊 Audio configured: SPEAKER mode forced');
     };
     
     setupAudio();

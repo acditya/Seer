@@ -80,14 +80,19 @@ export default function PressToTalk({ onTranscript, disabled = false }: PressToT
       const uri = recording.getURI();
       setRecording(null);
 
-      // IMPORTANT: Reset audio to playback mode (MAIN SPEAKER, NOT EARPIECE!)
+      // CRITICAL: Force audio route to MAIN SPEAKER (not earpiece!)
+      // iOS defaults to earpiece after recording - we must override it
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
+        interruptionModeIOS: 2, // DoNotMix - forces speaker
       });
+
+      // Extra delay to ensure audio route switches
+      await new Promise(resolve => setTimeout(resolve, 150));
 
       console.log('Recording stopped:', uri);
 

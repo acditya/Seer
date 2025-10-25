@@ -11,36 +11,37 @@ from openai import OpenAI, AzureOpenAI
 from PIL import Image
 
 
-# Natural, continuous guidance prompt with STRICT reaching criteria
-SYSTEM_PROMPT = """You are Seer, a friendly AI guide helping a visually impaired user navigate.
+# Natural, descriptive guidance for visually impaired users
+SYSTEM_PROMPT = """You are Seer, a friendly AI guide for a BLIND user navigating indoors.
 
-You see through their camera and give NATURAL, CONVERSATIONAL guidance every few seconds.
+You see through their camera and DESCRIBE what's there + give guidance.
 
-Rules:
-- Be NATURAL and friendly, like a friend walking with them
-- SHORT instructions: 8-12 words max (natural speech pace)
-- FIRST time: Confirm what you see excitedly: "Oh! The door's right there ahead!"
-- During walk: Casual updates: "Looking good, keep going", "Clear path ahead"
-- Warnings: Direct but calm: "Whoa, stop. Chair ahead on your right."
-- DON'T repeat yourself - vary your language naturally
+**CRITICAL RULES:**
+- USER IS BLIND - NEVER ask them visual questions!
+- DESCRIBE what you see: "I see a hallway with chairs on the right"
+- Be NATURAL and friendly, like a helpful friend
+- SHORT: 8-12 words max (natural speech pace)
+- FIRST time: "I see the door! It's straight ahead!"
+- During walk: "Clear path. Keep walking straight."
+- Warnings: "Stop. There's a chair right in front of you."
+- DON'T repeat - vary language naturally
 
-**CRITICAL - REACHED = TRUE ONLY WHEN:**
-- The destination is EXTREMELY close (within 1-2 feet)
-- Takes up MOST of the frame (they're basically touching it)
-- They can REACH OUT AND TOUCH IT
+**REACHED = TRUE ONLY WHEN:**
+- Destination is EXTREMELY close (within 1-2 feet)
+- Takes up MOST of the frame (almost touching it)
 - NOT just visible! NOT just "close"! ONLY when RIGHT AT IT!
 
 Examples:
-- First sight (far away) → "There it is! The door, straight ahead." (reached: FALSE)
-- Getting closer → "You're good, keep walking straight." (reached: FALSE)
-- Getting close → "Almost there, couple more steps!" (reached: FALSE)
-- Very close but not at it → "One more step forward!" (reached: FALSE)
-- RIGHT AT IT (fills frame, <1 foot) → "Perfect! You're right at the door!" (reached: TRUE)
-- Obstacle → "Hold up. Chair on your right, step left." (warning, reached: FALSE)
+- First sight → "I see the door! Straight ahead, ten feet." (reached: FALSE)
+- Clear walking → "Path is clear. Keep going straight." (reached: FALSE)
+- Getting close → "Almost there. Three more steps forward." (reached: FALSE)
+- Very close → "One more step. Door's right in front." (reached: FALSE)
+- RIGHT AT IT (fills frame) → "Perfect! You're at the door!" (reached: TRUE)
+- Obstacle → "Stop! Chair directly ahead, two feet away." (warning, reached: FALSE)
 
 Output JSON:
 {
-  "instruction": "natural guidance",
+  "instruction": "descriptive guidance",
   "urgency": "normal or warning",
   "reached": true/false,
   "danger_level": "safe or caution or danger"
@@ -193,25 +194,27 @@ def generate_instruction(
             lang_name = lang_names.get(language, 'English')
             
             if is_first:
-                user_message = f"""I want to go to: {checkpoint}
+                user_message = f"""User wants to go to: {checkpoint}
 
-Look at the image. Do you see {checkpoint}?
+Look at what the camera sees. DESCRIBE what's there.
 
-If you see it: Confirm enthusiastically! "The {checkpoint}! I see it."
-If you don't: "I don't see {checkpoint} yet. Describe what's ahead."
+If you see {checkpoint}: "I see the {checkpoint} straight ahead!"
+If you don't see it: "I see [what's actually there]. Let's find the {checkpoint}."
 
-**RESPOND IN {lang_name.upper()}**. SHORT response (10-15 words). JSON format."""
+USER IS BLIND - DESCRIBE, don't ask questions!
+**RESPOND IN {lang_name.upper()}**. SHORT (10-15 words). JSON format."""
             else:
-                user_message = f"""I'm navigating to: {checkpoint}
+                user_message = f"""User is navigating to: {checkpoint}
 
-Look at the camera. What do you see?
-- Any obstacles in my path?
-- Clear to move forward?
-- How close am I to {checkpoint}?
+Look at the camera view. DESCRIBE what you see:
+- What's directly in their path?
+- Any obstacles or dangers?
+- Where is {checkpoint} relative to them?
 
-Recent: {recent_instructions[-2:]}
+Recent guidance: {recent_instructions[-2:]}
 
-**RESPOND IN {lang_name.upper()}**. Guide me. SHORT (10-15 words). JSON format."""
+USER IS BLIND - DESCRIBE clearly, don't ask!
+**RESPOND IN {lang_name.upper()}**. SHORT (10-15 words). JSON format."""
 
             response = client.chat.completions.create(
                 model=model,

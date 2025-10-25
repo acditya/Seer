@@ -71,7 +71,7 @@ export default function App() {
   };
 
   /**
-   * Request permissions on mount.
+   * Request permissions and configure audio on mount.
    */
   useEffect(() => {
     (async () => {
@@ -82,6 +82,21 @@ export default function App() {
       // Request audio permission
       const audioStatus = await Audio.requestPermissionsAsync();
       setHasAudioPermission(audioStatus.status === 'granted');
+
+      // FORCE SPEAKER OUTPUT FROM START
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+          interruptionModeIOS: 2, // DoNotMix - FORCE SPEAKER!
+        });
+        console.log('🔊 App audio: SPEAKER mode forced at startup');
+      } catch (e) {
+        console.error('Audio setup error:', e);
+      }
 
       // Keep screen awake during navigation
       activateKeepAwakeAsync();
