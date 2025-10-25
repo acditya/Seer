@@ -7,6 +7,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Audio } from 'expo-av';
+import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { postAudio, postImage, postTTS, postPlan, Detection } from '../api';
 import type { StatusType } from '../components/StatusChip';
@@ -38,36 +39,34 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
   // History tracking
   const recentInstructions = useRef<string[]>([]);
   const historySnippets = useRef<string[]>([]);
-  const currentSound = useRef<Audio.Sound | null>(null);
 
   /**
-   * Play TTS audio from URL.
+   * Speak text using iOS built-in TTS.
    */
   const playTTS = useCallback(async (text: string, urgency: 'normal' | 'warning' = 'normal') => {
     try {
-      // Stop any currently playing sound
-      if (currentSound.current) {
-        await currentSound.current.stopAsync();
-        await currentSound.current.unloadAsync();
-        currentSound.current = null;
-      }
+      // Stop any currently speaking
+      Speech.stop();
 
-      // Get TTS URL
-      const audioUrl = await postTTS(text);
+      // Get text from server (passthrough)
+      const speechText = await postTTS(text);
+      console.log('Speaking:', speechText);
 
-      // Configure audio mode for playback
+      // Configure audio to use MAIN SPEAKER (not earpiece!)
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
       });
 
-      // Load and play
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        { shouldPlay: true }
-      );
-
-      currentSound.current = sound;
+      // Speak using iOS TTS
+      Speech.speak(speechText, {
+        language: 'en-US',
+        pitch: 1.0,
+        rate: urgency === 'warning' ? 0.85 : 0.9, // Slightly slower for warnings
+      });
 
       // Update UI
       setLastInstruction(text);
@@ -86,13 +85,6 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
         recentInstructions.current.shift();
       }
       historySnippets.current.push(`seer: ${text}`);
-
-      // Cleanup when finished
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
     } catch (error) {
       console.error('TTS playback error:', error);
       // Fallback: just show the text
@@ -121,11 +113,10 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
 
       // Handle voice commands based on state
       if (state === 'ASK_GOAL' || state === 'ASK_NEXT') {
-        // Set new checkpoint
+        // Set new checkpoint silently - LLM will confirm when it sees it!
         setCheckpointState(transcript);
         setState('NAVIGATING');
         setStatus('navigating');
-        await playTTS(`Navigating to ${transcript}.`);
       } else if (state === 'NAVIGATING') {
         // Handle in-navigation commands
         if (lowerTranscript.includes('stop') || lowerTranscript.includes('cancel')) {
@@ -182,16 +173,16 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     setIsProcessing(true);
 
     try {
-      // Detect objects
-      const detectResult = await postImage(imageUri);
-      console.log(`Detected ${detectResult.detections.length} objects`);
+      // Skip YOLO - just send image directly to GPT-4o vision!
+      console.log('Analyzing scene with GPT-4o vision...');
 
-      // Plan next instruction
+      // Plan next instruction (GPT-4o sees the image directly)
       const planResult = await postPlan(
         checkpoint,
-        detectResult.detections,
+        [],  // No YOLO detections needed!
         recentInstructions.current,
-        historySnippets.current
+        historySnippets.current,
+        imageUri  // Send camera image to GPT-4o!
       );
 
       console.log('Plan:', planResult);
@@ -236,10 +227,23 @@ export function useNavigationLoop(): UseNavigationLoopReturn {
     historySnippets.current = [];
   }, []);
 
-  // Speak welcome message on mount
+  // Configure audio and speak welcome message on mount
   useEffect(() => {
-    playTTS("Hi, I'm Seer. Say a checkpoint.");
-  }, []);
+    const setupAudio = async () => {
+      // Force main speaker (not earpiece)
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      
+      playTTS("Hi, I'm Seer. Say a checkpoint.");
+    };
+    
+    setupAudio();
+  }, [playTTS]);
 
   return {
     state,

@@ -48,8 +48,8 @@ export default function PressToTalk({ onTranscript, disabled = false }: PressToT
       setRecording(newRecording);
       setIsPressed(true);
       
-      // Haptic feedback
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      // Strong haptic feedback on recording start
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
       // Animate button press
       Animated.spring(scaleAnim, {
@@ -80,10 +80,19 @@ export default function PressToTalk({ onTranscript, disabled = false }: PressToT
       const uri = recording.getURI();
       setRecording(null);
 
+      // IMPORTANT: Reset audio to playback mode (MAIN SPEAKER, NOT EARPIECE!)
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
       console.log('Recording stopped:', uri);
 
-      // Haptic feedback
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      // Medium haptic feedback on recording stop
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       // Send to parent for transcription
       if (uri) {

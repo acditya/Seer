@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { Camera, CameraView, CameraType } from 'expo-camera';
+import { Camera, CameraView } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
@@ -21,8 +21,6 @@ import StatusChip from './src/components/StatusChip';
 import InstructionBanner from './src/components/InstructionBanner';
 import { useNavigationLoop } from './src/hooks/useNavigationLoop';
 import { colors, spacing } from './src/styles/tokens';
-
-const FRAME_INTERVAL_MS = 1200; // Capture frame every 1.2s
 
 export default function App() {
   // Permissions
@@ -44,8 +42,30 @@ export default function App() {
     isProcessing,
   } = useNavigationLoop();
 
-  // Frame capture interval
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  /**
+   * Handle press-to-talk: Capture frame + process voice.
+   */
+  const handleButtonPress = async (audioUri: string) => {
+    // First, process voice input
+    await handleVoiceInput(audioUri);
+    
+    // Then, if navigating, capture and analyze a frame
+    if (state === 'NAVIGATING' && checkpoint && cameraRef.current) {
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.5,
+          skipProcessing: true,
+        });
+        
+        if (photo?.uri) {
+          console.log('Frame captured:', photo.uri);
+          await handleFrameCapture(photo.uri);
+        }
+      } catch (error) {
+        console.error('Frame capture error:', error);
+      }
+    }
+  };
 
   /**
    * Request permissions on mount.
@@ -69,47 +89,7 @@ export default function App() {
     };
   }, []);
 
-  /**
-   * Start/stop frame capture based on navigation state.
-   */
-  useEffect(() => {
-    if (state === 'NAVIGATING' && checkpoint) {
-      console.log('Starting navigation loop...');
-
-      // Start interval for frame capture
-      intervalRef.current = setInterval(async () => {
-        if (cameraRef.current && !isProcessing) {
-          try {
-            // Capture frame
-            const photo = await cameraRef.current.takePictureAsync({
-              quality: 0.5,
-              skipProcessing: true,
-            });
-
-            if (photo?.uri) {
-              console.log('Frame captured:', photo.uri);
-              handleFrameCapture(photo.uri);
-            }
-          } catch (error) {
-            console.error('Frame capture error:', error);
-          }
-        }
-      }, FRAME_INTERVAL_MS);
-    } else {
-      // Stop interval when not navigating
-      if (intervalRef.current) {
-        console.log('Stopping navigation loop...');
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [state, checkpoint, isProcessing, handleFrameCapture]);
+  // No automatic loop! User presses button to analyze scene.
 
   /**
    * Show permission alerts if needed.
@@ -188,7 +168,7 @@ export default function App() {
         {/* Bottom section: Press-to-talk button */}
         <View style={styles.bottomSection}>
           <PressToTalk
-            onTranscript={handleVoiceInput}
+            onTranscript={handleButtonPress}
             disabled={isProcessing}
           />
           

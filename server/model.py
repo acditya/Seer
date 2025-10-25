@@ -5,10 +5,24 @@ Loads YOLOv8 once at startup for fast inference.
 
 import os
 from typing import List, Dict, Any
-from ultralytics import YOLO
 import numpy as np
 from PIL import Image
 import io
+import warnings
+import torch
+
+# Suppress warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+# CRITICAL FIX: Monkey-patch torch.load to use weights_only=False for YOLO
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    kwargs['weights_only'] = False  # Trust Ultralytics weights
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
+# Now import YOLO after patching
+from ultralytics import YOLO
 
 
 class YOLODetector:
@@ -17,13 +31,27 @@ class YOLODetector:
     def __init__(self, model_name: str = "yolov8n.pt"):
         """
         Initialize YOLO model.
+        Will download fresh weights from Ultralytics if not present.
         
         Args:
-            model_name: YOLO model file (downloads if not present)
+            model_name: YOLO model name (e.g., 'yolov8n.pt')
         """
         print(f"Loading YOLO model: {model_name}")
-        self.model = YOLO(model_name)
-        print("YOLO model loaded successfully")
+        print("Note: If this is first run, model will auto-download (~6MB)")
+        
+        try:
+            # YOLO will auto-download if weights don't exist
+            # Fresh download should work with PyTorch 2.6+
+            self.model = YOLO(model_name)
+            print("✓ YOLO model loaded successfully")
+        except Exception as e:
+            print(f"✗ Failed to load model: {e}")
+            print("Trying to force re-download...")
+            # Delete local weights and force fresh download
+            if os.path.exists(model_name):
+                os.remove(model_name)
+            self.model = YOLO(model_name)
+            print("✓ YOLO model loaded successfully (after re-download)")
     
     def detect(self, image_bytes: bytes) -> Dict[str, Any]:
         """
@@ -64,12 +92,12 @@ class YOLODetector:
                 
                 detections.append({
                     "cls": cls_name,
-                    "conf": round(conf, 2),
+                    "conf": float(round(conf, 2)),
                     "xywh": [
-                        round(cx, 1),
-                        round(cy, 1),
-                        round(w, 1),
-                        round(h, 1)
+                        float(round(cx, 1)),
+                        float(round(cy, 1)),
+                        float(round(w, 1)),
+                        float(round(h, 1))
                     ]
                 })
         

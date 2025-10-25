@@ -4,15 +4,16 @@ Provides endpoints for STT, TTS, object detection, and navigation planning.
 """
 
 import os
+import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-from model import get_detector
 from stt import transcribe_audio
 from tts import synthesize_speech, STATIC_DIR
 from plan import generate_instruction
+from state import update_scene, get_scene, clear_scene
 
 # Load environment variables
 load_dotenv()
@@ -29,11 +30,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 
-
-# Initialize YOLO model at startup
-print("Initializing YOLO detector...")
-get_detector()
-print("Server ready!")
+print("✅ Seer server ready! Using OpenAI for everything.")
 
 
 # ============================================================================
@@ -45,8 +42,9 @@ def root():
     """Health check endpoint."""
     return jsonify({
         "status": "ok",
-        "message": "Seer API is running",
-        "endpoints": ["/stt", "/tts", "/detect", "/plan"]
+        "message": "Seer API - OpenAI powered vision navigation",
+        "endpoints": ["/stt", "/tts", "/plan", "/scene"],
+        "powered_by": "OpenAI (Whisper + GPT-4o-mini Vision)"
     })
 
 
@@ -85,13 +83,13 @@ def speech_to_text():
 @app.route('/tts', methods=['POST'])
 def text_to_speech():
     """
-    Convert text to speech using ElevenLabs.
+    Return text for client-side iOS TTS.
     
     Expects:
-        JSON: {"text": "text to synthesize"}
+        JSON: {"text": "text to speak"}
         
     Returns:
-        JSON: {"url": "/static/uuid.mp3"}
+        JSON: {"text": "same text for iOS to speak"}
     """
     try:
         data = request.get_json()
@@ -100,106 +98,101 @@ def text_to_speech():
         
         text = data['text']
         
-        # Synthesize speech
-        url = synthesize_speech(text)
+        # Just pass through - client handles TTS
+        result_text = synthesize_speech(text)
         
-        return jsonify({"url": url})
+        return jsonify({"text": result_text})
     
     except Exception as e:
         print(f"TTS error: {e}")
         return jsonify({"error": f"Text-to-speech failed: {str(e)}"}), 500
 
 
-@app.route('/detect', methods=['POST'])
-def detect_objects():
-    """
-    Detect objects in image using YOLO.
-    
-    Expects:
-        image: JPEG image file
-        
-    Returns:
-        JSON: {
-            "img_w": int,
-            "img_h": int,
-            "detections": [{"cls": str, "conf": float, "xywh": [x,y,w,h]}]
-        }
-    """
-    try:
-        if 'image' not in request.files:
-            return jsonify({"error": "No image file provided"}), 400
-        
-        image_file = request.files['image']
-        if image_file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
-        
-        # Read image bytes
-        image_bytes = image_file.read()
-        
-        # Run detection
-        detector = get_detector()
-        result = detector.detect(image_bytes)
-        
-        return jsonify(result)
-    
-    except Exception as e:
-        print(f"Detection error: {e}")
-        return jsonify({"error": f"Object detection failed: {str(e)}"}), 500
-
-
 @app.route('/plan', methods=['POST'])
 def plan_navigation():
     """
-    Generate navigation instruction using OpenAI.
+    Generate navigation instruction using GPT-4o-mini vision.
     
     Expects:
-        JSON: {
-            "checkpoint": str,
-            "detections": list,
-            "recent_instructions": list,
-            "history_snippets": list
-        }
+        Form data with:
+            - checkpoint (str)
+            - detections (JSON string)
+            - recent_instructions (JSON string)
+            - history_snippets (JSON string)
+            - image (file, optional) - camera frame for vision analysis
         
     Returns:
         JSON: {
             "instruction": str,
             "urgency": str,
             "reached": bool,
-            "reason": str
+            "danger_level": str
         }
     """
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-        
-        checkpoint = data.get('checkpoint')
-        detections = data.get('detections', [])
-        recent_instructions = data.get('recent_instructions', [])
-        history_snippets = data.get('history_snippets', [])
+        # Check if multipart (with image) or JSON
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Multipart: image + data
+            checkpoint = request.form.get('checkpoint')
+            detections = json.loads(request.form.get('detections', '[]'))
+            recent_instructions = json.loads(request.form.get('recent_instructions', '[]'))
+            history_snippets = json.loads(request.form.get('history_snippets', '[]'))
+            
+            # Get image if provided
+            image_bytes = None
+            if 'image' in request.files:
+                image_file = request.files['image']
+                image_bytes = image_file.read()
+                print(f"📸 Received image: {len(image_bytes)} bytes")
+        else:
+            # JSON only (no image)
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+            
+            checkpoint = data.get('checkpoint')
+            detections = data.get('detections', [])
+            recent_instructions = data.get('recent_instructions', [])
+            history_snippets = data.get('history_snippets', [])
+            image_bytes = None
         
         if not checkpoint:
             return jsonify({"error": "No checkpoint provided"}), 400
         
-        # Generate instruction
+        # Generate instruction (with vision if image provided)
         result = generate_instruction(
             checkpoint=checkpoint,
             detections=detections,
             recent_instructions=recent_instructions,
-            history_snippets=history_snippets
+            history_snippets=history_snippets,
+            image_bytes=image_bytes
         )
+        
+        # Update server state
+        update_scene(checkpoint, detections, result)
         
         return jsonify(result)
     
     except Exception as e:
         print(f"Planning error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"Navigation planning failed: {str(e)}"}), 500
+
+
+@app.route('/scene', methods=['GET'])
+def get_current_scene():
+    """Get current scene state from server."""
+    return jsonify(get_scene())
 
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     """Serve static files (MP3 audio files)."""
-    return send_from_directory(str(STATIC_DIR), filename)
+    print(f"📡 Serving static file: {filename}")
+    response = send_from_directory(str(STATIC_DIR), filename)
+    response.headers['Content-Type'] = 'audio/mpeg'
+    return response
 
 
 # ============================================================================

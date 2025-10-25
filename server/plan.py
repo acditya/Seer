@@ -1,127 +1,265 @@
 """
-Navigation planning using Azure OpenAI.
-Generates short, safe instructions based on YOLO detections.
+Navigation planning with depth estimation and spatial awareness.
 """
 
 import os
 import json
-from typing import List, Dict, Any
+import base64
+from typing import List, Dict, Any, Optional
 from openai import OpenAI, AzureOpenAI
 
 
-# System prompt for Seer navigation (verbatim as specified)
-SYSTEM_PROMPT = """You are Seer, a mobility guide for a visually impaired user. You receive YOLO detections and a target checkpoint. Output one short, safe instruction (≤12 words) in plain language. Prefer "slight left/right", "pause", "continue", "step around". If a large obstacle is centered in the lower half, say to pause or step around before any forward motion. Never invent objects. Set reached:true only if the checkpoint clearly appears centered (or recent instructions suggest arrival) OR the user indicated arrival. Keep instruction short and speakable."""
+# Simple, direct prompt for GPT-4o vision
+SYSTEM_PROMPT = """You are Seer, a navigation guide for visually impaired users.
 
-# Few-shot examples (embedded in system prompt)
-FEW_SHOT_EXAMPLES = """
+You see through their camera and guide them to their destination.
+
+Rules:
+- SHORT instructions: 10-15 words max (5-7 seconds)
+- FIRST time seeing destination: Confirm it! "The door! I see it. Let's go."
+- During navigation: Guide based on what you SEE in the image
+- Warn about obstacles FIRST: "Stop. Chair ahead on right."
+- When at destination: "You're here! The door is right in front of you." (reached: true)
+
 Examples:
-- Door centered: → "Move forward two steps; door ahead." reached:true
-- Person crossing left: → "Pause. Person passing on your left." reached:false
-- Clear path: → "Continue straight for three steps." reached:false
+- User says "the door", you see a door → "The door! I see it straight ahead." (normal)
+- Clear path to door → "Clear ahead. Walk forward five steps." (normal)
+- Chair blocking path → "Stop. Chair two feet ahead. Step left." (warning)
+- Door very close → "Almost there! Door right in front." (reached: true)
+- At destination → "You're here! The door is in front of you." (reached: true)
+
+Output JSON:
+{
+  "instruction": "short guidance",
+  "urgency": "normal or warning",
+  "reached": true/false,
+  "danger_level": "safe or caution or danger"
+}
 """
 
 
+def estimate_depth_and_position(detection: Dict, img_w: int, img_h: int) -> Dict:
+    """
+    Estimate distance and position from bounding box.
+    
+    Simple heuristics:
+    - Vertical position: Lower in frame = closer
+    - Box size: Larger relative to frame = closer
+    - Horizontal position: Left/center/right
+    
+    Args:
+        detection: YOLO detection with xywh
+        img_w: Image width
+        img_h: Image height
+        
+    Returns:
+        Enhanced detection with distance and position
+    """
+    cx, cy, w, h = detection["xywh"]
+    
+    # Estimate distance (rough approximation)
+    # Objects lower in frame and larger are closer
+    vertical_ratio = cy / img_h  # 0 = top, 1 = bottom
+    size_ratio = (w * h) / (img_w * img_h)  # How much of frame it occupies
+    
+    # Distance estimation (feet)
+    # Lower + larger = closer
+    if vertical_ratio > 0.7 and size_ratio > 0.1:
+        distance = "1-2 feet"
+        distance_value = 1.5
+    elif vertical_ratio > 0.6 and size_ratio > 0.05:
+        distance = "2-4 feet"
+        distance_value = 3
+    elif vertical_ratio > 0.5:
+        distance = "4-6 feet"
+        distance_value = 5
+    elif vertical_ratio > 0.4:
+        distance = "6-10 feet"
+        distance_value = 8
+    else:
+        distance = "10+ feet"
+        distance_value = 12
+    
+    # Horizontal position
+    horizontal_ratio = cx / img_w
+    if horizontal_ratio < 0.33:
+        position = "left"
+    elif horizontal_ratio > 0.67:
+        position = "right"
+    else:
+        position = "center"
+    
+    # Is this a direct obstacle? (center + close)
+    is_obstacle = position == "center" and distance_value < 4
+    
+    return {
+        "object": detection["cls"],
+        "confidence": detection["conf"],
+        "distance": distance,
+        "distance_feet": distance_value,
+        "position": position,
+        "is_direct_obstacle": is_obstacle,
+        "raw_xywh": detection["xywh"]
+    }
+
+
 def create_planning_client():
-    """
-    Create OpenAI client from environment variables.
-    Supports both Azure OpenAI and standard OpenAI API.
-    """
-    # Check if using Azure OpenAI
+    """Create OpenAI/Azure OpenAI client."""
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
+    azure_key = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_KEY")
+    api_version = os.getenv("AZURE_OPENAI_VERSION", "2024-02-15-preview")
     
     if azure_endpoint and azure_key:
-        # Use Azure OpenAI
         return AzureOpenAI(
             azure_endpoint=azure_endpoint,
             api_key=azure_key,
-            api_version="2024-02-15-preview"
+            api_version=api_version
         )
     
-    # Otherwise use standard OpenAI API
     api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_API_BASE")  # Optional custom endpoint
-    
     if not api_key:
-        raise ValueError("Either AZURE_OPENAI credentials or OPENAI_API_KEY must be set")
+        raise ValueError("Azure OpenAI or OpenAI API key required")
     
-    client_kwargs = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
-    
-    return OpenAI(**client_kwargs)
+    return OpenAI(api_key=api_key)
 
 
 def generate_instruction(
     checkpoint: str,
     detections: List[Dict[str, Any]],
     recent_instructions: List[str],
-    history_snippets: List[str]
+    history_snippets: List[str],
+    image_bytes: Optional[bytes] = None
 ) -> Dict[str, Any]:
     """
-    Generate next navigation instruction using Azure OpenAI.
+    Generate navigation instruction with spatial awareness.
     
     Args:
-        checkpoint: Target destination (e.g., "elevator")
-        detections: YOLO detections from current frame
-        recent_instructions: Last few instructions given
-        history_snippets: Conversation history (user/seer exchanges)
+        checkpoint: Target destination
+        detections: Raw YOLO detections
+        recent_instructions: Recent navigation history
+        history_snippets: Conversation context
         
     Returns:
-        Dict with instruction, urgency, reached, reason
+        Instruction with urgency and spatial info
     """
-    client = create_planning_client()
+    # Use standard OpenAI for vision (simpler, always works)
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise ValueError("OPENAI_API_KEY required for vision")
     
-    # Get model/deployment name (works for both Azure and OpenAI)
-    model = os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    client = OpenAI(api_key=openai_key)
+    model = "gpt-4o-mini"  # Standard OpenAI with vision support
     
-    # Build user message with context
-    user_message = f"""Target checkpoint: {checkpoint}
+    # Call LLM with vision if image provided
+    try:
+        if image_bytes:
+            # Use GPT-4o-mini VISION to see the actual image
+            print(f"🔍 Using vision model to analyze image ({len(image_bytes)} bytes)")
+            
+            # Encode image to base64
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # Check if this is the first instruction (confirming destination)
+            is_first = not recent_instructions or len(recent_instructions) == 0
+            
+            if is_first:
+                user_message = f"""I want to go to: {checkpoint}
 
-Current detections (YOLO):
-{json.dumps(detections, indent=2)}
+Look at the image. Do you see {checkpoint}?
 
-Recent instructions:
-{json.dumps(recent_instructions, indent=2)}
+If you see it: Confirm enthusiastically! "The {checkpoint}! I see it."
+If you don't: "I don't see {checkpoint} yet. Describe what's ahead."
 
-History:
-{json.dumps(history_snippets[-5:], indent=2)}
+SHORT response (10-15 words). JSON format."""
+            else:
+                user_message = f"""I'm navigating to: {checkpoint}
 
-Generate the next instruction as JSON:
-{{
-  "instruction": "short instruction text",
-  "urgency": "normal|warning",
-  "reached": false,
-  "reason": "brief explanation"
-}}"""
-    
-    # Call OpenAI with low temperature for deterministic output
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
-        ],
-        temperature=0.2,
-        max_tokens=150,
-        response_format={"type": "json_object"}  # Force JSON output
-    )
-    
-    # Parse response
-    content = response.choices[0].message.content
-    result = json.loads(content)
-    
-    # Ensure all required fields exist
-    return {
-        "instruction": result.get("instruction", "Continue forward."),
-        "urgency": result.get("urgency", "normal"),
-        "reached": result.get("reached", False),
-        "reason": result.get("reason", "")
-    }
+Look at the camera. What do you see?
+- Any obstacles in my path?
+- Clear to move forward?
+- How close am I to {checkpoint}?
 
+Recent: {recent_instructions[-2:]}
+
+Guide me. SHORT (10-15 words). JSON format."""
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_message},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}",
+                                    "detail": "low"  # Faster processing
+                                }
+                            }
+                        ]
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=150,
+                response_format={"type": "json_object"}
+            )
+        else:
+            # Fallback: Use YOLO detections only
+            print(f"⚠️ No image provided, using YOLO detections only")
+            
+            img_w = 1280
+            img_h = 720
+            
+            enhanced_detections = [
+                estimate_depth_and_position(det, img_w, img_h) 
+                for det in detections
+            ]
+            enhanced_detections.sort(key=lambda x: x["distance_feet"])
+            
+            scene_description = []
+            for det in enhanced_detections[:5]:
+                desc = f"- {det['object']}: {det['distance']} away, {det['position']} side"
+                if det['is_direct_obstacle']:
+                    desc += " ⚠️ BLOCKING PATH"
+                scene_description.append(desc)
+            
+            user_message = f"""Target: {checkpoint}
+
+Scene: {chr(10).join(scene_description) if scene_description else "Clear path"}
+
+Recent: {recent_instructions[-3:] if recent_instructions else ["Starting"]}
+
+JSON instruction:"""
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.3,
+                max_tokens=150,
+                response_format={"type": "json_object"}
+            )
+        
+        result = json.loads(response.choices[0].message.content)
+        
+        return {
+            "instruction": result.get("instruction", "Continue forward."),
+            "urgency": result.get("urgency", "normal"),
+            "reached": result.get("reached", False),
+            "danger_level": result.get("danger_level", "safe")
+        }
+        
+    except Exception as e:
+        print(f"Planning error: {e}")
+        # Fallback instruction
+        return {
+            "instruction": "Continue forward carefully.",
+            "urgency": "normal",
+            "reached": False,
+            "reason": f"Error: {str(e)}",
+            "danger_level": "safe"
+        }

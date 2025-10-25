@@ -30,7 +30,7 @@ const STTResponseSchema = z.object({
 });
 
 const TTSResponseSchema = z.object({
-  url: z.string(),
+  text: z.string(),
 });
 
 const DetectionSchema = z.object({
@@ -49,7 +49,7 @@ const PlanResponseSchema = z.object({
   instruction: z.string(),
   urgency: z.string(),
   reached: z.boolean(),
-  reason: z.string(),
+  danger_level: z.string(),
 });
 
 // ============================================================================
@@ -129,7 +129,7 @@ export async function postImage(imageUri: string): Promise<DetectResponse> {
 }
 
 /**
- * Send text for speech synthesis.
+ * Get text for client-side speech synthesis (iOS TTS).
  */
 export async function postTTS(text: string): Promise<string> {
   try {
@@ -137,33 +137,61 @@ export async function postTTS(text: string): Promise<string> {
     
     const validated = TTSResponseSchema.parse(response.data);
     
-    // Return full URL (relative path from server needs base URL)
-    return `${SERVER_URL}${validated.url}`;
+    // Return text for iOS to speak
+    return validated.text;
   } catch (error) {
     console.error('TTS API error:', error);
-    throw new Error('Failed to synthesize speech');
+    throw new Error('Failed to get speech text');
   }
 }
 
 /**
- * Send navigation planning request.
+ * Send navigation planning request with camera image for vision analysis.
  */
 export async function postPlan(
   checkpoint: string,
   detections: Detection[],
   recentInstructions: string[] = [],
-  historySnippets: string[] = []
+  historySnippets: string[] = [],
+  imageUri?: string
 ): Promise<PlanResponse> {
   try {
-    const response = await api.post('/plan', {
-      checkpoint,
-      detections,
-      recent_instructions: recentInstructions,
-      history_snippets: historySnippets,
-    });
-    
-    const validated = PlanResponseSchema.parse(response.data);
-    return validated;
+    if (imageUri) {
+      // Send with image for GPT-4o vision analysis
+      const formData = new FormData();
+      formData.append('checkpoint', checkpoint);
+      formData.append('detections', JSON.stringify(detections));
+      formData.append('recent_instructions', JSON.stringify(recentInstructions));
+      formData.append('history_snippets', JSON.stringify(historySnippets));
+      
+      // Append image
+      const filename = imageUri.split('/').pop() || 'frame.jpg';
+      formData.append('image', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: filename,
+      } as any);
+      
+      const response = await api.post('/plan', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      const validated = PlanResponseSchema.parse(response.data);
+      return validated;
+    } else {
+      // JSON only (no image)
+      const response = await api.post('/plan', {
+        checkpoint,
+        detections,
+        recent_instructions: recentInstructions,
+        history_snippets: historySnippets,
+      });
+      
+      const validated = PlanResponseSchema.parse(response.data);
+      return validated;
+    }
   } catch (error) {
     console.error('Plan API error:', error);
     throw new Error('Failed to generate navigation plan');

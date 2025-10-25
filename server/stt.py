@@ -1,37 +1,48 @@
 """
 Speech-to-text using OpenAI Whisper API.
+Handles M4A files natively!
 """
 
 import os
+from io import BytesIO
 from openai import OpenAI
 
 
 def transcribe_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> str:
     """
-    Transcribe audio using Whisper API.
+    Transcribe audio using OpenAI Whisper API.
     
     Args:
-        audio_bytes: Audio file bytes (m4a, wav, etc.)
-        filename: Original filename (for format detection)
+        audio_bytes: Audio file bytes (M4A from iPhone)
+        filename: Original filename
         
     Returns:
         Transcribed text
     """
-    api_key = os.getenv("WHISPER_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("WHISPER_API_KEY not set in environment")
+        raise ValueError("OPENAI_API_KEY not set in .env!")
     
     client = OpenAI(api_key=api_key)
     
-    # Create a file-like object for the API
-    audio_file = ("audio.m4a", audio_bytes, "audio/m4a")
+    print(f"🎙️ Transcribing {len(audio_bytes)} bytes with Whisper...")
     
-    # Call Whisper API
-    response = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file,
-        language="en"  # Force English for faster processing
-    )
+    # Create file-like object from bytes
+    audio_file = BytesIO(audio_bytes)
+    audio_file.name = filename  # Whisper needs a filename
     
-    return response.text.strip()
-
+    try:
+        # Call Whisper API (supports M4A natively!)
+        response = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language="en"
+        )
+        
+        transcript = response.text.strip()
+        print(f"✅ Whisper: '{transcript}'")
+        return transcript
+        
+    except Exception as e:
+        print(f"❌ Whisper error: {e}")
+        raise

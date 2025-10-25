@@ -20,10 +20,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [],
   extra: {
-    // TODO: Update this to your local machine's IP address (not localhost)
-    // Find your IP: macOS/Linux: ifconfig | grep inet, Windows: ipconfig
-    // Example: http://192.168.1.100:8000
-    serverUrl: process.env.SERVER_URL || 'http://localhost:8000',
+    // Server URL - Update this to your computer's IP address
+    serverUrl: 'http://10.225.45.156:8000',
   },
 });
 
