@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Seer",
+    "slug": "seer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.seer.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Seer uses the camera to detect objects and guide you to your destination.",
+        "NSMicrophoneUsageDescription": "Seer uses the microphone to understand your voice commands."
+      }
+    },
+    "plugins": []
+  }
+}
+
